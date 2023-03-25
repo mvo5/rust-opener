@@ -22,8 +22,10 @@ fn gen_nonce() -> String {
 }
 
 // XXX: actually implement a open for esp32 rust :)
-fn toggle_pin() -> () {
+fn toggle_pin() -> std::io::Result<()> {
     println!("toggle pin");
+
+    Ok(())
 }
 
 fn send_with_hmac(
@@ -32,7 +34,7 @@ fn send_with_hmac(
     nonce: &str,
     msg: HashMap<String, String>,
 ) -> std::io::Result<()> {
-    let mut sjm = SignedJsonMessage::new(hmac_key, &nonce);
+    let mut sjm = SignedJsonMessage::new(hmac_key, nonce);
     // XXX: switch sjm to use serde_json::Map instead of HashMap
     sjm.payload = msg;
     // XXX: use anyhow::Error or something here
@@ -40,7 +42,7 @@ fn send_with_hmac(
         .to_string()
         .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
     s.push('\n');
-    stream.write(&s.as_bytes())?;
+    stream.write_all(s.as_bytes())?;
 
     Ok(())
 }
@@ -56,7 +58,7 @@ fn recv_with_hmac(
     // XXX: discard empty lines here?
     reader.read_line(&mut line)?;
     let line = line.trim();
-    let cmd = SignedJsonMessage::from_string(&line, hmac_key, &nonce)
+    let cmd = SignedJsonMessage::from_string(line, hmac_key, nonce)
         .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
 
     Ok(cmd.payload)
@@ -86,12 +88,12 @@ fn handle_client_connection(
         ("version".to_string(), "1".to_string()),
         ("api".to_string(), "opener".to_string()),
     ]);
-    send_with_hmac(&stream, &hmac_key, &nonce, payload)?;
+    send_with_hmac(&stream, hmac_key, &nonce, payload)?;
 
     // expect command from client
-    let cmd = recv_with_hmac(&stream, &hmac_key, &nonce)?;
+    let cmd = recv_with_hmac(&stream, hmac_key, &nonce)?;
     match cmd.get("cmd").map_or("", String::as_ref) {
-        "open" => toggle_pin(),
+        "open" => toggle_pin()?,
         unknown => Err(std::io::Error::new(
             ErrorKind::Other,
             format!("unknown command {unknown}"),
@@ -100,7 +102,7 @@ fn handle_client_connection(
 
     // send ok
     let payload = HashMap::from([("status".to_string(), "ok".to_string())]);
-    send_with_hmac(&stream, &hmac_key, &nonce, payload)?;
+    send_with_hmac(&stream, hmac_key, &nonce, payload)?;
 
     Ok(())
 }
